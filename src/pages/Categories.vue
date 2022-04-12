@@ -1,16 +1,59 @@
 <template>
-  <div id="app">
-    <ol>
+  
+    
+    <ol class="ol-parent">
+      <h1 v-if="loadingMessage">
+        Данные запрашиваются с сервера
+      </h1>
       <li
         v-for="item in arrayCategories"
         :key="item.id"
-        @click="item=>item"
       >
-        <p>{{item.name}}</p>
-        <p>подкатегорий: {{item.children.length}}</p>
+        <p
+          @click='queryProducts(item)'
+        >
+          {{item.name}} - уровень: {{item.level}}
+        </p>
+        <p
+          @click="openAndCloseChildrenCategories(item)"
+        >
+          подкатегорий: {{item.children.length}}
+        </p>
+        <template v-if="openChildrenCategories[item.id]">
+          <ol>
+            <li
+              v-for="item2 in openChildrenCategories[item.id]"
+              :key="item2.id"
+            >
+              <p  @click='queryProducts(item2)'>
+                {{item2.name}} - уровень: {{item2.level}}
+              </p>
+              <p
+                @click="openAndCloseChildrenCategories(item2)"
+              >
+                подкатегорий: {{item2.children.length}}
+              </p>
+              <template v-if="openChildrenCategories[item2.id]">
+                <ol>
+                  <li
+                    v-for="item3 in openChildrenCategories[item2.id]"
+                    :key="item3.id"
+                  >
+                    <p  @click='queryProducts(item3)'>
+                      {{item3.name}}  - уровень: {{item3.level}}
+                    </p>
+                    <p>
+                      подкатегорий: {{item3.children.length}}
+                    </p>
+                  </li>
+                </ol>
+              </template>
+            </li>
+          </ol>
+        </template>
       </li>
     </ol>
-  </div>
+  
 </template>
 
 <script>
@@ -25,6 +68,8 @@ export default {
       transactionID: null,
       incorrectId: true,
       md5: require('md5'),
+      openChildrenCategories: {},
+      loadingMessage: false
     })
   },
   computed: {
@@ -39,7 +84,8 @@ export default {
     ])
   },
   methods: {
-    async receiptCategory(){
+    async queryCategory(){
+      this.loadingMessage = true;
       await fetch(`${process.env.VUE_APP_API}/${this.$route.meta.method}`, {
         method: "POST",
         headers: new Headers ( { "Content-Type": "application/xml"} ),
@@ -104,9 +150,97 @@ export default {
               categoriesObj[el.id] = cat;
             }
           })
+          this.loadingMessage = false;
           this.$store.commit('addCategories', categoriesObj )
         }
       })
+    },
+
+    openAndCloseChildrenCategories(parent) {
+      if(!parent.children.length) alert('Нет дочерних категорий')
+      if (this.openChildrenCategories[parent.id]) {
+        
+        delete this.openChildrenCategories[parent.id]
+        this.openChildrenCategories = Object.assign({}, this.openChildrenCategories)
+      } else {
+        this.$set(
+          this.openChildrenCategories,
+          parent.id, 
+          parent.children.map(id=>this.$store.state.categories[id])
+        )
+      }
+      
+    },
+
+    queryProducts(category) {
+      const arrayId = []
+      this.recursionCategories(category, arrayId)
+      let transactionID = 0;
+      while (!transactionID) {
+        transactionID = parseFloat(prompt('укажите идентификатор для запроса товаров'));
+      }
+      let stringXmlQuery = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <Request>
+        <Authentication>
+          <Login>${this.login}</Login>
+          <TransactionID>${transactionID}</TransactionID>
+          <MethodName>GetProduct</MethodName>
+          <Hash>${this.md5(`${transactionID}GetProduct${this.login}${this.passmord}`)}</Hash>
+        </Authentication>
+        <Parameters>
+          <Limit offset="0" row_count="1000"/>
+          <Categories>`
+      for (let i = 0; i < arrayId.length; ++i) {
+        console.log(i, arrayId.length);
+        stringXmlQuery += `
+            <Category>${arrayId[i]}</Category>`
+      }
+      stringXmlQuery += `
+          </Categories>
+          <Params>
+          </Params>
+        </Parameters>
+      </Request>`;
+      console.log(stringXmlQuery.trim())
+      fetch(`${process.env.VUE_APP_API}/GetProduct`, {
+        method: "POST",
+        headers: new Headers ( { "Content-Type": "application/xml"} ),
+        body: stringXmlQuery.trim(),
+      })
+      .then(response => response.text())
+      .then(text=>{
+        const xmlParser = new DOMParser()
+        const doc =  xmlParser.parseFromString(text, 'text/xml');
+        console.log(doc)
+        if(doc.querySelector('Status').innerHTML === '1'){
+          alert(doc.querySelector('ErrorMessage').innerHTML)
+        } else {
+          const products = doc.querySelectorAll('Product');
+          const arrayProducts = [];
+          products.forEach(prod => {
+            const params = prod.querySelectorAll('*');
+            let objProd = {};
+            params.forEach(param => {
+              objProd[param.tagName.toLowerCase()] = param.innerHTML
+            })
+            arrayProducts.push(objProd)
+          });
+          this.$store.commit('addProducs', arrayProducts );
+          this.$router.push({name: 'Products'})   ;
+        }
+      });
+    },
+
+    recursionCategories(category, arrayId) {
+      console.log(category, arrayId)
+      arrayId.push(category.id)
+      if (category.children.length) {
+        for (let i = 0; i < category.children.length; i++) {
+          let childCategory = this.$store.state.categories[category.children[i]]
+          this.recursionCategories(childCategory, arrayId)
+        }
+      }
     }
   },
 
@@ -119,8 +253,29 @@ export default {
       } else {
         continue;
       }
-      await this.receiptCategory();
+      await this.queryCategory();
     }
   }
 }
 </script>
+
+<style>
+  .ol-parent {
+    width: 50%;
+    background-color: rgb(207, 216, 220);
+    padding: 20px;
+  }
+  .ol-parent > li {
+    color: rgb(101, 31, 255);
+  }
+  li {
+    margin-bottom: 20px;
+    margin-left: 15px
+  }
+  li p {
+    margin:0;
+    cursor: pointer;
+  }
+
+
+</style>

@@ -12,6 +12,19 @@ const routes = [
     },    
     component: () => import('./pages/Categories'),
   },
+  {
+    path: '/poducts-list',
+    name: 'Products',
+    meta: {
+      methodProduct: 'GetProduct',
+    },
+    component: () => import('./pages/Products'),
+  },
+  {
+    path: '/poduct/:id',
+    name: 'Product',
+    component: () => import('./pages/Product'),
+  },
 ]
 const router = new VueRouter({
   mode: 'history',
